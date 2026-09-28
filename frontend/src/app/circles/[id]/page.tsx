@@ -29,6 +29,7 @@ import { assetLabel, formatCycleLength, formatDeadline, formatXlm, shortenAddres
 import { rememberCircleId } from "@/lib/circle-cache";
 import { WalletError } from "@/lib/wallet";
 import { hasContributedCached, missedCountCached, invalidateCircleCache } from "@/lib/rpc-cache";
+import { paginate } from "@/lib/paginate";
 
 const STATUS_TONE = {
   [CircleStatus.Forming]: "gold" as const,
@@ -42,6 +43,9 @@ const STATUS_LABEL = {
   [CircleStatus.Completed]: "Completed",
   [CircleStatus.Cancelled]: "Cancelled",
 };
+
+/** Members shown per page in the payout-order list (#58). */
+const MEMBERS_PAGE_SIZE = 10;
 
 interface MemberRow {
   address: string;
@@ -272,6 +276,8 @@ function CircleDetail({
   const isMember = address ? circle.members.includes(address) : false;
   const isCreator = address === circle.creator;
   const myRow = members.find((m) => m.address === address);
+  const [memberPage, setMemberPage] = useState(1);
+  const memberPageView = paginate(members, memberPage, MEMBERS_PAGE_SIZE);
   const recipient =
     circle.status !== CircleStatus.Completed && circle.currentCycle < circle.members.length
       ? circle.members[circle.currentCycle]
@@ -357,44 +363,78 @@ function CircleDetail({
           <h2 className="eyebrow">Members &middot; payout order</h2>
         </div>
         <ul className="divide-y divide-border">
-          {members.map((m, index) => (
-            <li key={m.address} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border-strong text-xs font-medium text-muted">
-                  {index + 1}
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate font-mono text-sm">{shortenAddress(m.address, 6)}</p>
-                  {m.address === address && <p className="text-xs accent-text">You</p>}
-                </div>
-                <CopyButton value={m.address} label="" className="shrink-0" />
-              </div>
-              <div className="flex flex-wrap items-center gap-2 pl-10 sm:flex-nowrap sm:gap-3 sm:pl-0">
-                {m.strikes > 0 && (
-                  <span className="flex items-center gap-1 text-xs text-accent-rose">
-                    <AlertTriangle size={13} />
-                    {m.strikes} missed
+          {memberPageView.items.map((m, pageIndex) => {
+            const index = memberPageView.offset + pageIndex;
+            return (
+              <li key={m.address} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border-strong text-xs font-medium text-muted">
+                    {index + 1}
                   </span>
-                )}
-                {circle.status === CircleStatus.Active &&
-                  (m.paidThisCycle ? (
-                    <span className="flex items-center gap-1 text-xs text-accent-green">
-                      <CheckCircle2 size={14} />
-                      Paid this cycle
+                  <div className="min-w-0">
+                    <p className="truncate font-mono text-sm">{shortenAddress(m.address, 6)}</p>
+                    {m.address === address && <p className="text-xs accent-text">You</p>}
+                  </div>
+                  <CopyButton value={m.address} label="" className="shrink-0" />
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pl-10 sm:flex-nowrap sm:gap-3 sm:pl-0">
+                  {m.strikes > 0 && (
+                    <span className="flex items-center gap-1 text-xs text-accent-rose">
+                      <AlertTriangle size={13} />
+                      {m.strikes} missed
                     </span>
-                  ) : (
-                    <span className="flex items-center gap-1 text-xs text-muted">
-                      <CircleIcon size={14} />
-                      Waiting
-                    </span>
-                  ))}
-                {index === circle.currentCycle && circle.status !== CircleStatus.Completed && (
-                  <Badge tone="gold">Next payout</Badge>
-                )}
-              </div>
-            </li>
-          ))}
+                  )}
+                  {circle.status === CircleStatus.Active &&
+                    (m.paidThisCycle ? (
+                      <span className="flex items-center gap-1 text-xs text-accent-green">
+                        <CheckCircle2 size={14} />
+                        Paid this cycle
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-xs text-muted">
+                        <CircleIcon size={14} />
+                        Waiting
+                      </span>
+                    ))}
+                  {index === circle.currentCycle && circle.status !== CircleStatus.Completed && (
+                    <Badge tone="gold">Next payout</Badge>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
+        {memberPageView.totalPages > 1 && (
+          <nav
+            aria-label="Members pagination"
+            className="flex items-center justify-between gap-3 border-t border-border px-6 py-3 text-xs text-muted"
+          >
+            <span>
+              {memberPageView.offset + 1}–{memberPageView.offset + memberPageView.items.length} of {members.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setMemberPage(memberPageView.page - 1)}
+                disabled={memberPageView.page <= 1}
+              >
+                Previous
+              </Button>
+              <span aria-live="polite">
+                Page {memberPageView.page} of {memberPageView.totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setMemberPage(memberPageView.page + 1)}
+                disabled={memberPageView.page >= memberPageView.totalPages}
+              >
+                Next
+              </Button>
+            </div>
+          </nav>
+        )}
       </Card>
     </div>
   );
