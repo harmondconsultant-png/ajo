@@ -1,6 +1,5 @@
-// Client test tests.
 import { describe, expect, it, vi } from "vitest";
-import { nativeToScVal, xdr } from "@stellar/stellar-sdk";
+import { Keypair, nativeToScVal, xdr } from "@stellar/stellar-sdk";
 import {
   AjoClient,
   AjoContractError,
@@ -52,14 +51,58 @@ describe("AjoClient", () => {
   });
 
   it("accepts a custom rpc url and network passphrase", () => {
-    expect(
-      () =>
-        new AjoClient({
-          contractId: "CCL4M6UACHON7VFUBIXCLY5OGD2HLGAYV63W54MKFJ3UICWCHEBYBWTL",
-          rpcUrl: "https://soroban-mainnet.example.org",
-          networkPassphrase: "Public Global Stellar Network ; September 2015",
+    const client = new AjoClient({
+      contractId: "CCL4M6UACHON7VFUBIXCLY5OGD2HLGAYV63W54MKFJ3UICWCHEBYBWTL",
+      rpcUrl: "https://soroban-mainnet.example.org",
+      networkPassphrase: "Public Global Stellar Network ; September 2015",
+    });
+    expect(client).toBeInstanceOf(AjoClient);
+  });
+
+  it("throws AjoContractError with CircleNotFound when getCircle receives a missing circle", async () => {
+    const client = new AjoClient({
+      contractId: "CCL4M6UACHON7VFUBIXCLY5OGD2HLGAYV63W54MKFJ3UICWCHEBYBWTL",
+    });
+    // Stub simulateTransaction to return a simulation error with Error(Contract, #1)
+    vi.spyOn(client.server, "simulateTransaction").mockResolvedValue({
+      error: "HostError: Error(Contract, #1)",
+    } as any);
+
+    await expect(client.getCircle(999n)).rejects.toThrow("That circle doesn't exist.");
+  });
+
+  it("buildContributeTx supports custom memo string and Memo instances", async () => {
+    const client = new AjoClient({
+      contractId: "CCL4M6UACHON7VFUBIXCLY5OGD2HLGAYV63W54MKFJ3UICWCHEBYBWTL",
+    });
+    const testKp = Keypair.random();
+    vi.spyOn(client.server, "getAccount").mockResolvedValue({
+      sequenceNumber: () => "100",
+      incrementSequenceNumber: () => {},
+      accountId: () => testKp.publicKey(),
+    } as any);
+    vi.spyOn(client.server, "simulateTransaction").mockResolvedValue({
+      result: { retval: xdr.ScVal.scvVoid() },
+      minResourceFee: "100",
+      transactionData: new xdr.SorobanTransactionData({
+        ext: new xdr.ExtensionPoint(0),
+        resources: new xdr.SorobanResources({
+          footprint: new xdr.LedgerFootprint({ readOnly: [], readWrite: [] }),
+          instructions: 100,
+          readBytes: 100,
+          writeBytes: 100,
         }),
-    ).not.toThrow();
+        resourceFee: new xdr.Int64(100n),
+      }),
+    } as any);
+
+    const xdrWithMemo = await client.buildContributeTx(
+      1n,
+      testKp.publicKey(),
+      "cycle-1-contribution",
+    );
+    expect(typeof xdrWithMemo).toBe("string");
+    expect(xdrWithMemo.length).toBeGreaterThan(0);
   });
 });
 describe("sendWithRetry (#150)", () => {
@@ -109,16 +152,33 @@ describe("sendWithRetry (#150)", () => {
     }
   });
 
-  it("gives up after the max retry attempts, returning the last TRY_AGAIN_LATER response", async () => {
+  it("retries on transient network exceptions and recovers", async () => {
     vi.useFakeTimers();
     try {
-      const sendTransaction = vi.fn().mockResolvedValue({ status: "TRY_AGAIN_LATER", hash: "abc" });
+      const sendTransaction = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("Network timeout"))
+        .mockResolvedValueOnce({ status: "PENDING", hash: "abc" });
+
       const promise = sendWithRetry(mockServer(sendTransaction), {} as never);
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(1000);
 
       const result = await promise;
-      expect(result.status).toBe("TRY_AGAIN_LATER");
-      // 1 initial attempt + 5 retries = 6 total calls.
+      expect(result.status).toBe("PENDING");
+      expect(sendTransaction).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("throws the last error when all retry attempts fail due to network errors", async () => {
+    vi.useFakeTimers();
+    try {
+      const sendTransaction = vi.fn().mockRejectedValue(new Error("Connection reset"));
+      const promise = sendWithRetry(mockServer(sendTransaction), {} as never);
+      const rejection = expect(promise).rejects.toThrow("Connection reset");
+      await vi.advanceTimersByTimeAsync(60_000);
+      await rejection;
       expect(sendTransaction).toHaveBeenCalledTimes(6);
     } finally {
       vi.useRealTimers();

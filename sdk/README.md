@@ -22,7 +22,9 @@ npm install @ajo/sdk
 import { AjoClient, CircleStatus } from "@ajo/sdk";
 
 const ajo = new AjoClient({
-  contractId: "CCL4M6UACHON7VFUBIXCLY5OGD2HLGAYV63W54MKFJ3UICWCHEBYBWTL", // testnet
+  contractId: "CCL4M6UACHON7VFUBIXCLY5OGD2HLGAYV63W54MKFJ3UICWCHEBYBWTL",
+  rpcUrl: "https://soroban-testnet.stellar.org", // optional: custom RPC endpoint (defaults to testnet)
+  networkPassphrase: "Test SDF Network ; September 2015", // optional: network passphrase
 });
 
 // Reads need no wallet.
@@ -32,7 +34,8 @@ console.log(circle.status === CircleStatus.Active);
 const openCircleIds = await ajo.discoverCircleIds(); // reads the contract's own event log
 
 // Writes: build unsigned XDR, sign it yourself, submit it.
-const unsignedXdr = await ajo.buildContributeTx(circleId, memberPublicKey);
+// buildContributeTx accepts an optional memo (string or Memo object) for tracking.
+const unsignedXdr = await ajo.buildContributeTx(circleId, memberPublicKey, "cycle-1-payment");
 const signedXdr = await yourWallet.sign(unsignedXdr); // however your app signs
 await ajo.submitSignedTx(signedXdr);
 ```
@@ -41,7 +44,7 @@ await ajo.submitSignedTx(signedXdr);
 
 | Method | Signer required | What it does |
 |---|---|---|
-| `getCircle(id)` | No | Full circle state |
+| `getCircle(id)` | No | Full circle state (throws typed `AjoContractError` if not found) |
 | `hasContributed(id, cycle, member)` | No | Whether a member has paid the given cycle |
 | `missedCount(id, member)` | No | A member's missed-deadline strike count |
 | `totalCircles()` | No | Running count of circles ever created |
@@ -50,7 +53,7 @@ await ajo.submitSignedTx(signedXdr);
 | `buildJoinCircleTx(id, member)` | Yes | Join a forming circle |
 | `buildLeaveCircleTx(id, member)` | Yes | Leave a forming circle |
 | `buildCancelCircleTx(id, creator)` | Yes | Creator cancels a forming circle |
-| `buildContributeTx(id, member)` | Yes | Pay the current cycle's contribution |
+| `buildContributeTx(id, member, memo?)` | Yes | Pay the current cycle's contribution (supports custom memo) |
 | `buildDisburseTx(id, caller)` | Yes | Pay out the current cycle (callable by anyone) |
 | `submitSignedTx(signedXdr)` | — | Submit a caller-signed transaction and wait for it to land |
 
