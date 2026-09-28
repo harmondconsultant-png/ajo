@@ -19,7 +19,16 @@ import {
   getTotalCircles,
   submitSignedTx,
 } from "@/lib/contract";
-import { assetLabel, formatCycleLength, formatXlm, shortenAddress, xlmToStroops } from "@/lib/format";
+import {
+  ASSET_DECIMALS,
+  assetLabel,
+  clampDecimals,
+  formatCycleLength,
+  formatXlm,
+  isValidAmount,
+  shortenAddress,
+  xlmToStroops,
+} from "@/lib/format";
 import { getKnownCircleIds, rememberCircleIds } from "@/lib/circle-cache";
 import { WalletError } from "@/lib/wallet";
 import { ContractCallError } from "@/lib/contract";
@@ -104,6 +113,10 @@ export default function CirclesPage() {
     const token = tokenChoice === "native" ? NATIVE_TOKEN_ID : customToken.trim();
     if (tokenChoice === "custom" && !token) {
       toast.error("Enter the asset's contract address.");
+      return;
+    }
+    if (!isValidAmount(amount)) {
+      toast.error(`Enter a contribution greater than zero, with at most ${ASSET_DECIMALS} decimal places.`);
       return;
     }
     setCreating(true);
@@ -194,15 +207,17 @@ export default function CirclesPage() {
                 )}
                 <label className="text-sm">
                   <span className="mb-1.5 block text-xs text-muted">
-                    Contribution per member {tokenChoice === "native" ? "(XLM)" : "(smallest-unit decimal, 7 places)"}
+                    Contribution per member{" "}
+                    {tokenChoice === "native" ? "(XLM)" : `(token units, up to ${ASSET_DECIMALS} decimal places)`}
                   </span>
                   <input
                     required
                     type="number"
+                    inputMode="decimal"
                     min="0.0000001"
-                    step="any"
+                    step="0.0000001"
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    onChange={(e) => setAmount(clampDecimals(e.target.value))}
                     className="w-full rounded-xl border border-border-strong bg-background px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none"
                   />
                 </label>

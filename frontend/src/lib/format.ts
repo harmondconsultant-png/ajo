@@ -1,6 +1,13 @@
 // Format.
 const STROOPS_PER_XLM = 10_000_000n;
 
+/**
+ * Decimal places supported by circle assets. Native XLM and every Stellar
+ * Asset Contract token use 7 (one stroop), and xlmToStroops scales by 7 —
+ * anything finer would be silently truncated on submission.
+ */
+export const ASSET_DECIMALS = 7;
+
 export function formatXlm(stroops: bigint): string {
   const whole = stroops / STROOPS_PER_XLM;
   const frac = stroops % STROOPS_PER_XLM;
@@ -13,6 +20,27 @@ export function xlmToStroops(xlm: string): bigint {
   const [whole, frac = ""] = xlm.trim().split(".");
   const paddedFrac = (frac + "0000000").slice(0, 7);
   return BigInt(whole || "0") * STROOPS_PER_XLM + BigInt(paddedFrac || "0");
+}
+
+/**
+ * Clamp a user-typed decimal amount to at most `decimals` fractional digits,
+ * so the input never shows more precision than the asset can hold.
+ * Truncates (never rounds up) to match xlmToStroops.
+ */
+export function clampDecimals(value: string, decimals = ASSET_DECIMALS): string {
+  const dot = value.indexOf(".");
+  if (dot === -1) return value;
+  const frac = value.slice(dot + 1);
+  if (frac.length <= decimals) return value;
+  return decimals === 0 ? value.slice(0, dot) : value.slice(0, dot + 1 + decimals);
+}
+
+/** True for a plain positive decimal string within the asset's precision (no exponents, signs or excess digits). */
+export function isValidAmount(value: string, decimals = ASSET_DECIMALS): boolean {
+  const match = /^(\d*)(?:\.(\d*))?$/.exec(value.trim());
+  if (!match || (match[1] === "" && !match[2])) return false;
+  if ((match[2] ?? "").length > decimals) return false;
+  return xlmToStroops(value) > 0n;
 }
 
 export function shortenAddress(address: string, chars = 4): string {
