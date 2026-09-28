@@ -1,6 +1,15 @@
 // Format test tests.
 import { describe, expect, it } from "vitest";
-import { assetLabel, formatCycleLength, formatDeadline, formatXlm, shortenAddress, xlmToStroops } from "./format";
+import {
+  assetLabel,
+  clampDecimals,
+  formatCycleLength,
+  formatDeadline,
+  formatXlm,
+  isValidAmount,
+  shortenAddress,
+  xlmToStroops,
+} from "./format";
 
 describe("formatXlm", () => {
   it("formats a whole number of stroops with no decimal point", () => {
@@ -36,6 +45,54 @@ describe("xlmToStroops", () => {
 
   it("treats a bare decimal point as zero", () => {
     expect(xlmToStroops(".")).toBe(0n);
+  });
+});
+
+describe("clampDecimals (#54)", () => {
+  it("leaves values within the asset's precision untouched", () => {
+    expect(clampDecimals("10")).toBe("10");
+    expect(clampDecimals("1.5")).toBe("1.5");
+    expect(clampDecimals("1.1234567")).toBe("1.1234567");
+    expect(clampDecimals("1.")).toBe("1.");
+    expect(clampDecimals("")).toBe("");
+  });
+
+  it("truncates excess fractional digits to 7 places by default", () => {
+    expect(clampDecimals("1.123456789")).toBe("1.1234567");
+    expect(clampDecimals("0.00000009")).toBe("0.0000000");
+  });
+
+  it("honours a custom precision", () => {
+    expect(clampDecimals("1.239", 2)).toBe("1.23");
+    expect(clampDecimals("1.9", 0)).toBe("1");
+  });
+
+  it("agrees with xlmToStroops so nothing is lost on submission", () => {
+    const typed = "3.141592653";
+    expect(xlmToStroops(clampDecimals(typed))).toBe(xlmToStroops(typed));
+    expect(formatXlm(xlmToStroops(clampDecimals(typed)))).toBe(clampDecimals(typed));
+  });
+});
+
+describe("isValidAmount (#54)", () => {
+  it("accepts positive amounts within 7 decimal places", () => {
+    expect(isValidAmount("10")).toBe(true);
+    expect(isValidAmount("0.0000001")).toBe(true);
+    expect(isValidAmount(".5")).toBe(true);
+  });
+
+  it("rejects amounts finer than the asset supports", () => {
+    expect(isValidAmount("0.00000001")).toBe(false);
+    expect(isValidAmount("1.12345678")).toBe(false);
+  });
+
+  it("rejects zero, empty, signed and exponent input", () => {
+    expect(isValidAmount("0")).toBe(false);
+    expect(isValidAmount("0.0000000")).toBe(false);
+    expect(isValidAmount("")).toBe(false);
+    expect(isValidAmount(".")).toBe(false);
+    expect(isValidAmount("-1")).toBe(false);
+    expect(isValidAmount("1e-8")).toBe(false);
   });
 });
 
