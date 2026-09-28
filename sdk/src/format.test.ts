@@ -1,6 +1,5 @@
-// Format tests (#107).
 import { describe, expect, it } from "vitest";
-import { formatXlm, xlmToStroops } from "./format";
+import { formatXlm, parseAmount, xlmToStroops } from "./format";
 
 describe("formatXlm", () => {
   it("formats a whole number of stroops with no decimal point", () => {
@@ -14,6 +13,21 @@ describe("formatXlm", () => {
 
   it("formats zero", () => {
     expect(formatXlm(0n)).toBe("0");
+  });
+});
+
+describe("parseAmount (#67)", () => {
+  it("parses valid integer and decimal numbers", () => {
+    expect(parseAmount("100")).toBe(100);
+    expect(parseAmount("12.34")).toBe(12.34);
+    expect(parseAmount("0.5")).toBe(0.5);
+  });
+
+  it("throws on non-numeric strings instead of returning NaN", () => {
+    expect(() => parseAmount("abc")).toThrow('Invalid numeric amount: "abc"');
+    expect(() => parseAmount("")).toThrow("Invalid numeric amount");
+    expect(() => parseAmount("12.34.56")).toThrow("Invalid numeric amount");
+    expect(() => parseAmount("100xyz")).toThrow("Invalid numeric amount");
   });
 });
 
@@ -36,5 +50,10 @@ describe("xlmToStroops", () => {
 
   it("treats a bare decimal point as zero", () => {
     expect(xlmToStroops(".")).toBe(0n);
+  });
+
+  it("rejects non-numeric strings", () => {
+    expect(() => xlmToStroops("abc")).toThrow('Invalid XLM amount: "abc"');
+    expect(() => xlmToStroops("12.34.56")).toThrow("Invalid XLM amount");
   });
 });
