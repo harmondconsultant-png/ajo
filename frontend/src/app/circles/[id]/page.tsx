@@ -8,6 +8,7 @@ import { CheckCircle2, Circle as CircleIcon, AlertTriangle } from "lucide-react"
 import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
 import { Button, Card, Badge, CopyButton } from "@/components/ui";
+import { CircleNotFound } from "@/components/circle-not-found";
 import { CircleDetailSkeleton } from "./circle-detail-skeleton";
 import { useWallet } from "@/context/wallet-context";
 import {
@@ -27,6 +28,8 @@ import {
 } from "@/lib/contract";
 import { assetLabel, formatCycleLength, formatDeadline, formatXlm, shortenAddress } from "@/lib/format";
 import { rememberCircleId } from "@/lib/circle-cache";
+import { parseCircleId } from "@/lib/circle-id";
+import { ContractErrorCode } from "@/lib/contract-errors";
 import { WalletError } from "@/lib/wallet";
 import { hasContributedCached, missedCountCached, invalidateCircleCache } from "@/lib/rpc-cache";
 
@@ -49,12 +52,6 @@ interface MemberRow {
   strikes: number;
 }
 
-/** Route params are arbitrary strings — only accept a non-negative integer as a circle id. */
-function parseCircleId(raw: string): bigint | null {
-  if (!/^\d+$/.test(raw)) return null;
-  return BigInt(raw);
-}
-
 export default function CircleDetailPage() {
   const params = useParams<{ id: string }>();
   const circleId = parseCircleId(params.id);
@@ -62,14 +59,13 @@ export default function CircleDetailPage() {
 
   const [circle, setCircle] = useState<Circle | null>(null);
   const [members, setMembers] = useState<MemberRow[] | null>(null);
-  const [error, setError] = useState<string | null>(
-    circleId === null ? `"${params.id}" isn't a valid circle id.` : null,
-  );
+  const [notFound, setNotFound] = useState(circleId === null);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"join" | "contribute" | "disburse" | "leave" | "cancel" | null>(null);
 
   useEffect(() => {
-    document.title = circleId !== null ? `Circle #${circleId} · Ajo` : "Circle not found · Ajo";
-  }, [circleId]);
+    document.title = circleId !== null && !notFound ? `Circle #${circleId} · Ajo` : "Circle not found · Ajo";
+  }, [circleId, notFound]);
 
   const refresh = useCallback(async () => {
     if (circleId === null) return;
@@ -110,7 +106,11 @@ export default function CircleDetailPage() {
 
       setMembers(rows);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load this circle.");
+      if (err instanceof ContractCallError && err.code === ContractErrorCode.CircleNotFound) {
+        setNotFound(true);
+      } else {
+        setError(err instanceof Error ? err.message : "Could not load this circle.");
+      }
     }
   }, [circleId]);
 
@@ -222,7 +222,9 @@ export default function CircleDetailPage() {
       <Navbar />
       <main className="flex-1">
         <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6">
-          {error ? (
+          {notFound ? (
+            <CircleNotFound rawId={params.id} />
+          ) : error ? (
             <Card className="p-6 text-sm text-accent-rose" role="alert">
               {error}
             </Card>
