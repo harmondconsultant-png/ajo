@@ -1,10 +1,10 @@
-// Client.
 import {
   Account,
   Address,
   Contract,
   FeeBumpTransaction,
   Keypair,
+  Memo,
   Transaction,
   TransactionBuilder,
   BASE_FEE,
@@ -117,16 +117,24 @@ export async function sendWithRetry(
   server: rpc.Server,
   tx: Transaction | FeeBumpTransaction,
 ): Promise<rpc.Api.SendTransactionResponse> {
-  let sent = await server.sendTransaction(tx);
-  for (
-    let attempt = 0;
-    sent.status === "TRY_AGAIN_LATER" && attempt < SEND_TX_MAX_ATTEMPTS;
-    attempt++
-  ) {
-    await new Promise((resolve) => setTimeout(resolve, SEND_TX_RETRY_BASE_DELAY_MS * 2 ** attempt));
-    sent = await server.sendTransaction(tx);
+  let sent: rpc.Api.SendTransactionResponse | undefined;
+  for (let attempt = 0; attempt <= SEND_TX_MAX_ATTEMPTS; attempt++) {
+    try {
+      sent = await server.sendTransaction(tx);
+      if (sent.status === "TRY_AGAIN_LATER" && attempt < SEND_TX_MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, SEND_TX_RETRY_BASE_DELAY_MS * 2 ** attempt));
+        continue;
+      }
+      return sent;
+    } catch (err) {
+      if (attempt < SEND_TX_MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, SEND_TX_RETRY_BASE_DELAY_MS * 2 ** attempt));
+        continue;
+      }
+      throw err;
+    }
   }
-  return sent;
+  return sent!;
 }
 
 /**
@@ -156,6 +164,9 @@ export class AjoClient {
 
   async getCircle(circleId: bigint): Promise<Circle> {
     const raw = await this.readCall<RawCircle>("get_circle", [nativeToScVal(circleId, { type: "u64" })]);
+    if (!raw) {
+      throw new AjoContractError("That circle doesn't exist.", ContractErrorCode.CircleNotFound);
+    }
     return parseCircle(raw);
   }
 
@@ -270,11 +281,16 @@ export class AjoClient {
     ]);
   }
 
-  async buildContributeTx(circleId: bigint, member: string): Promise<string> {
-    return this.buildTx(member, "contribute", [
-      nativeToScVal(circleId, { type: "u64" }),
-      new Address(member).toScVal(),
-    ]);
+  async buildContributeTx(circleId: bigint, member: string, memo?: string | Memo): Promise<string> {
+    return this.buildTx(
+      member,
+      "contribute",
+      [
+        nativeToScVal(circleId, { type: "u64" }),
+        new Address(member).toScVal(),
+      ],
+      memo,
+    );
   }
 
   /** Callable by anyone — no privileged keeper role. */
@@ -297,12 +313,21 @@ export class AjoClient {
     }
 
     const maxAttempts = 40; // ~60s at 1.5s/poll — a dropped tx should never hang the caller forever
-    let result = await this.server.getTransaction(sent.hash);
-    for (let attempt = 0; result.status === "NOT_FOUND" && attempt < maxAttempts; attempt++) {
+    let result: rpc.Api.GetTransactionResponse | null = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        result = await this.server.getTransaction(sent.hash);
+        if (result.status !== "NOT_FOUND") {
+          break;
+        }
+      } catch (err) {
+        if (attempt === maxAttempts - 1) {
+          throw err;
+        }
+      }
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      result = await this.server.getTransaction(sent.hash);
     }
-    if (result.status === "NOT_FOUND") {
+    if (!result || result.status === "NOT_FOUND") {
       throw new AjoContractError(`Transaction ${sent.hash} was not found on-chain after ${maxAttempts} polls — it may have been dropped.`);
     }
     if (result.status !== "SUCCESS") {
@@ -325,12 +350,22 @@ export class AjoClient {
     return scValToNative(sim.result!.retval) as T;
   }
 
-  private async buildTx(sourcePublicKey: string, method: string, args: xdr.ScVal[]): Promise<string> {
+  private async buildTx(
+    sourcePublicKey: string,
+    method: string,
+    args: xdr.ScVal[],
+    memo?: string | Memo,
+  ): Promise<string> {
     const account = await this.server.getAccount(sourcePublicKey);
-    const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: this.networkPassphrase })
+    const builder = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: this.networkPassphrase })
       .addOperation(this.contract.call(method, ...args))
-      .setTimeout(60)
-      .build();
+      .setTimeout(60);
+
+    if (memo) {
+      builder.addMemo(typeof memo === "string" ? Memo.text(memo) : memo);
+    }
+
+    const tx = builder.build();
 
     const sim = await this.server.simulateTransaction(tx);
     if (rpc.Api.isSimulationError(sim)) {
