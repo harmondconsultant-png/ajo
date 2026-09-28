@@ -10,9 +10,30 @@ export function formatXlm(stroops: bigint): string {
   return `${whole}.${fracStr}`;
 }
 
+/**
+ * Parse an amount string into a number, throwing on non-numeric or invalid strings (#67)
+ * instead of silently returning NaN.
+ */
+export function parseAmount(amount: string): number {
+  const trimmed = amount.trim();
+  if (!trimmed || !/^\d+(\.\d+)?$/.test(trimmed)) {
+    throw new Error(`Invalid numeric amount: "${amount}"`);
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || Number.isNaN(parsed)) {
+    throw new Error(`Invalid numeric amount: "${amount}"`);
+  }
+  return parsed;
+}
+
 /** Parse a decimal XLM string into stroops, truncating past 7 decimal places. */
 export function xlmToStroops(xlm: string): bigint {
-  const [whole, frac = ""] = xlm.trim().split(".");
+  const trimmed = xlm.trim();
+  if (trimmed === "." || trimmed === "") return 0n;
+  if (!/^\d*(\.\d*)?$/.test(trimmed)) {
+    throw new Error(`Invalid XLM amount: "${xlm}"`);
+  }
+  const [whole = "", frac = ""] = trimmed.split(".");
   const paddedFrac = (frac + "0000000").slice(0, 7);
   return BigInt(whole || "0") * STROOPS_PER_XLM + BigInt(paddedFrac || "0");
 }
